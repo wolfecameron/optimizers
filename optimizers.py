@@ -45,10 +45,10 @@ class SGD_weight_decay(SGD_main):
             fn += torch.sqrt(torch.sum(p**2))
         return fn
 
-class SGD_momentum(SGD_wd):
+class SGD_momentum(SGD_weight_decay):
     """SGD with momentum -- approximates first moment of gradient for smoother updates"""
   
-    def __init__(self, model, lr:float=3e-3, wd:float=1e-2, m:float=.9):
+    def __init__(self, model, lr:float=3e-3, wd:float=1e-4, m:float=.9):
         super().__init__(model, lr, wd)
         self.m = m
         self.prev_steps = [] # store momentum terms
@@ -68,7 +68,7 @@ class SGD_momentum(SGD_wd):
                         self.prev_steps[i] = m_t
                     p.sub_(m_t) # update parameters inplace
 
-class RMS_prop(SGD_wd):
+class RMS_prop(SGD_weight_decay):
     """RMSProp optimizer"""
  
     def __init__(self, model, lr:float=3e-3, wd:float=1e-4, b:float=.9, e:float=1e-8):
@@ -94,8 +94,63 @@ class RMS_prop(SGD_wd):
                     step = (self.lr * p.grad)/torch.sqrt(r_dx + self.epsilon)
                     p.sub_(step) # update parameters inplace
 
-class Adam(SGD_wd):
-  """adam (adaptive moment estimation) optimizer"""
+class Adagrad(SGD_weight_decay):
+    """adaptive gradient optimizer"""
+
+    def __init__(self, model, lr:float=3e-3, wd:float=1e-4, e:float=1e-8):
+        super().__init__(model, lr, wd)
+        self.epsilon = e
+        self.sum_sq_grad = []
+
+    def step(self):
+        """perform update using adaptive gradient update step"""
+
+        with torch.no_grad():
+            for i, p in enumerate(self.model.parameters()):
+                if not p.grad is None:
+                    if i >= len(self.sum_sq_grad):
+                        sq_grad = (p.grad**2)
+                        self.sum_sq_grad.append(sq_grad)
+                    else:
+                        self.sum_sq_grad[i] += (p.grad**2)
+                        sq_grad = self.sum_sq_grad[i]
+                    # algorithm performs much worse without sqrt because denominator term
+                    # that scales the update grows much too quickly
+                    step = (self.lr / torch.sqrt(sq_grad + self.epsilon)) * p.grad
+                    p.sub_(step) # update the parameters inplace
+    
+class Adadelta(SGD_weight_decay):
+    """adadelta gradient optimizer -- adadelta does not require a learning rate because it
+    simply uses the unit correction term in the numerator instead of learning rate"""
+
+    def __init__(self, model, wd:float=1e-4, m:float=0.9, e:float=1e-8):
+        super().__init__(model, 0, wd)
+        self.m = m
+        self.epsilon = e
+        self.unit_correction = []
+        self.prev_rms = []
+
+    def step(self):
+        with torch.no_grad():
+            for i, p in enumerate(self.model.parameters()):
+                if not p.grad is None:
+                    if i >= len(self.prev_rms) or i >= len(self.unit_correction):
+                        v_t = (1 - self.m) * (p.grad**2)
+                        self.prev_rms.append(v_t)
+                        step = (torch.sqrt(torch.tensor(self.epsilon))/torch.sqrt(v_t + self.epsilon))*p.grad
+                        correction = (1 - self.m) * (step**2)
+                        self.unit_correction.append(correction)
+                    else:
+                        v_t = self.m*self.prev_rms[i] + (1 - self.m) * (p.grad**2)
+                        self.prev_rms[i] = v_t
+                        step = (torch.sqrt(self.unit_correction[i] + self.epsilon)/torch.sqrt(v_t + self.epsilon))*p.grad
+                        correction = (self.m)*self.unit_correction[i] + (1 - self.m)*(step**2)
+                        self.unit_correction[i] = correction
+                    p.sub_(step) # update parameters inplace
+                         
+
+class Adam(SGD_weight_decay):
+    """adam (adaptive moment estimation) optimizer"""
   
     def __init__(self, model, lr:float=3e-3, wd:float=1e-4, m:float=.9, b:float=.99, e:float=1e-8):
         super().__init__(model, lr, wd)
