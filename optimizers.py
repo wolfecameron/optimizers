@@ -25,31 +25,31 @@ class SGD_main():
             if not p.grad is None:
                 p.grad.zero_()
 
-class SGD_weight_decay(SGD_main):
-    """SGD extended with weight decay"""
-  
-    def __init__(self, model, lr:float=3e-3, wd:float=1e-4):
-        super().__init__(model, lr)
-        self.wd = wd
-  
-    def wd_loss(self):
-        """calculates portion of loss from weight decay"""
+#class SGD_weight_decay(SGD_main):
+#    """SGD extended with weight decay"""
+#  
+#    def __init__(self, model, lr:float=3e-3, wd:float=1e-4):
+#        super().__init__(model, lr)
+#        self.wd = wd
+#  
+#    def wd_loss(self):
+#        """calculates portion of loss from weight decay"""
+#
+#        return self.wd * self.frobenius_norm()
+#  
+#    def frobenius_norm(self):
+#        """get forbenius norm summed across all parameters in model"""
+#
+#        fn = 0.0
+#        for p in self.model.parameters():
+#            fn += torch.sqrt(torch.sum(p**2))
+#        return fn
 
-        return self.wd * self.frobenius_norm()
-  
-    def frobenius_norm(self):
-        """get forbenius norm summed across all parameters in model"""
-
-        fn = 0.0
-        for p in self.model.parameters():
-            fn += torch.sqrt(torch.sum(p**2))
-        return fn
-
-class SGD_momentum(SGD_weight_decay):
+class SGD_momentum(SGD_main):
     """SGD with momentum -- approximates first moment of gradient for smoother updates"""
   
-    def __init__(self, model, lr:float=3e-3, wd:float=1e-4, m:float=.9):
-        super().__init__(model, lr, wd)
+    def __init__(self, model, lr:float=3e-3, m:float=.9):
+        super().__init__(model, lr)
         self.m = m
         self.prev_steps = [] # store momentum terms
     
@@ -68,11 +68,11 @@ class SGD_momentum(SGD_weight_decay):
                         self.prev_steps[i] = m_t
                     p.sub_(m_t) # update parameters inplace
 
-class RMS_prop(SGD_weight_decay):
+class RMS_prop(SGD_main):
     """RMSProp optimizer"""
  
-    def __init__(self, model, lr:float=3e-3, wd:float=1e-4, b:float=.9, e:float=1e-8):
-        super().__init__(model, lr, wd)
+    def __init__(self, model, lr:float=3e-3, b:float=.9, e:float=1e-8):
+        super().__init__(model, lr)
         self.b = b
         self.epsilon = e
         self.prev_rms = [] # tracks second moment terms
@@ -94,11 +94,11 @@ class RMS_prop(SGD_weight_decay):
                     step = (self.lr * p.grad)/torch.sqrt(r_dx + self.epsilon)
                     p.sub_(step) # update parameters inplace
 
-class Adagrad(SGD_weight_decay):
+class Adagrad(SGD_main):
     """adaptive gradient optimizer"""
 
-    def __init__(self, model, lr:float=3e-3, wd:float=1e-4, e:float=1e-8):
-        super().__init__(model, lr, wd)
+    def __init__(self, model, lr:float=3e-3, e:float=1e-8):
+        super().__init__(model, lr)
         self.epsilon = e
         self.sum_sq_grad = []
 
@@ -119,12 +119,12 @@ class Adagrad(SGD_weight_decay):
                     step = (self.lr / torch.sqrt(sq_grad + self.epsilon)) * p.grad
                     p.sub_(step) # update the parameters inplace
     
-class Adadelta(SGD_weight_decay):
+class Adadelta(SGD_main):
     """adadelta gradient optimizer -- adadelta does not require a learning rate because it
     simply uses the unit correction term in the numerator instead of learning rate"""
 
-    def __init__(self, model, wd:float=1e-4, m:float=0.9, e:float=1e-8):
-        super().__init__(model, 0, wd)
+    def __init__(self, model, m:float=0.9, e:float=1e-8):
+        super().__init__(model, 0)
         self.m = m
         self.epsilon = e
         self.unit_correction = []
@@ -149,11 +149,11 @@ class Adadelta(SGD_weight_decay):
                     p.sub_(step) # update parameters inplace
                          
 
-class Adam(SGD_weight_decay):
+class Adam(SGD_main):
     """adam (adaptive moment estimation) optimizer"""
   
-    def __init__(self, model, lr:float=3e-3, wd:float=1e-4, m:float=.9, b:float=.99, e:float=1e-8):
-        super().__init__(model, lr, wd)
+    def __init__(self, model, lr:float=3e-3, m:float=.9, b:float=.99, e:float=1e-8):
+        super().__init__(model, lr)
         self.m = m
         self.b = b
         self.epsilon = e
