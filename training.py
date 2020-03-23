@@ -5,10 +5,9 @@ import torch
 from torch import nn
 from torchvision import models
 
-from get_data import get_mnist_dl
-from models import (
-    Mnist_Logistic,
-)
+from get_data import get_mnist_dl, get_cifar10_dl
+from models import Mnist_Logistic
+from vis import plot_metrics
 from optimizers import (
     SGD_main,
     SGD_momentum,
@@ -16,9 +15,6 @@ from optimizers import (
     Adam,
     Adagrad,
     Adadelta,
-)
-from vis import (
-    plot_metrics,
 )
 
 def get_optimizer_class(opt_str, use_pytorch_opt=False):
@@ -68,9 +64,14 @@ def main(specs):
     elif specs['model'] == 'CNN':
         # get resnet18 and change size of output layer
         model = models.resnet18(pretrained=False)
-        model.conv1 = torch.nn.Conv2d(
-                in_channels=1, out_channels=64, kernel_size=(7, 7),
-                stride=(2, 2), padding=(3, 3))
+        if specs['dataset'] == 'MNIST':
+            model.conv1 = torch.nn.Conv2d(
+                    in_channels=1, out_channels=64, kernel_size=(7, 7),
+                    stride=(2, 2), padding=(3, 3))
+        else:
+            model.conv1 = torch.nn.Conv2d(
+                    in_channels=3, out_channels=64, kernel_size=(7, 7),
+                    stride=(2, 2), padding=(3, 3))
         model.fc = torch.nn.Linear(in_features=512, out_features=specs['num_out'])
         model.device = 'cuda' if torch.cuda.is_available() else 'cpu'
     else:
@@ -97,6 +98,9 @@ def main(specs):
     # get the data
     if specs['dataset'] == 'MNIST':
         train_dl, valid_dl = get_mnist_dl(**specs['dataset_specs'])
+        test_dl = None
+    elif specs['dataset'] == 'CIFAR10':
+        train_dl, valid_dl, test_dl = get_cifar10_dl(**specs['dataset_specs'])
     else:
         print(f'Dataset {specs["dataset"]} is unknown.')
         return None        
@@ -132,6 +136,23 @@ def main(specs):
             valid_acc = total_correct/total_ex
             accs.append(valid_acc)
             print(f'Epoch {e} Valid Acc.: {valid_acc:.4f}')
+
+    # optionally run evaluation test data
+    if test_dl is not None:
+        model.eval()
+        with torch.no_grad():
+            total_correct = 0.
+            total_ex = 0.
+            for x, y in test_dl:
+                x = x.to(model.device)
+                y = y.to(model.device)
+                preds = model(x)
+                preds = preds.argmax(dim=1)
+                num_correct = int(torch.sum((preds == y).float()))
+                total_correct += num_correct
+                total_ex += y.shape[0]
+            test_acc = total_correct/total_ex
+            print(f'Test Accuracy: {valid_acc:.4f}')
     return losses, accs
 
 # CONVEX OPTIMIZATION EXPERIMENTS
@@ -257,9 +278,9 @@ if __name__=='__main__':
                     #'b': .999,
                     #'e': 1e-8,
                 },
-            'dataset': 'MNIST',
+            'dataset': 'CIFAR10',
             'dataset_specs': {
-                    'flat': False,
+                    #'flat': False,
                     'bs': 128,
             }
         }
