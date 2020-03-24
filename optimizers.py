@@ -25,26 +25,6 @@ class SGD_main():
             if not p.grad is None:
                 p.grad.zero_()
 
-#class SGD_weight_decay(SGD_main):
-#    """SGD extended with weight decay"""
-#  
-#    def __init__(self, model, lr:float=3e-3, wd:float=1e-4):
-#        super().__init__(model, lr)
-#        self.wd = wd
-#  
-#    def wd_loss(self):
-#        """calculates portion of loss from weight decay"""
-#
-#        return self.wd * self.frobenius_norm()
-#  
-#    def frobenius_norm(self):
-#        """get forbenius norm summed across all parameters in model"""
-#
-#        fn = 0.0
-#        for p in self.model.parameters():
-#            fn += torch.sqrt(torch.sum(p**2))
-#        return fn
-
 class SGD_momentum(SGD_main):
     """SGD with momentum -- approximates first moment of gradient for smoother updates"""
   

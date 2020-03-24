@@ -155,8 +155,6 @@ def main(specs):
             print(f'Test Accuracy: {valid_acc:.4f}')
     return losses, accs
 
-# CONVEX OPTIMIZATION EXPERIMENTS
-
 def sgd_diff_lr(training_specs):
     """experiment for SGD with weight decay with a bunch of different learning rates"""
 
