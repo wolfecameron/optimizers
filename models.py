@@ -80,8 +80,8 @@ if __name__=='__main__':
     train_dl, _, _ = get_cifar10_dl(**{'bs': 64})
 
     # run the lr finder
-    start_lr = 1e-4
-    end_lr = .1
+    start_lr = 1e-3
+    end_lr = .3
     num_it = 20
     lr_finder = LR_finder(start_lr, end_lr, num_it, model, opt, loss_func, train_dl)
     lr_finder.lr_find()

@@ -143,7 +143,7 @@ class Adam(SGD_main):
     
     def step(self):
         """perform optimization step with adam algorithm"""
- 
+
         with torch.no_grad():
             for i, p in enumerate(self.model.parameters()):
                 if not p.grad is None:

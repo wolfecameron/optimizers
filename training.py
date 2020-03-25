@@ -1,5 +1,7 @@
 # contains main training loop for all optimizer tests
 
+import math
+
 from tqdm import tqdm
 import torch
 from torch import nn
@@ -43,7 +45,44 @@ def get_optimizer_class(opt_str, use_pytorch_opt=False):
         return None
     return opt_map[opt_str]
 
-def update(x, y, net, opt, loss_func=nn.CrossEntropyLoss(), use_pytorch_opt=False):
+def get_lr_sched_func(sched_str):
+    """returns the learning rate scheduler function given string from specs"""
+
+    sched_map = {
+            'step': get_lr_step,
+            'inverse_annealing': get_lr_inverse_annealing,
+            'root_inverse_annealing': get_lr_root_inverse_annealing,
+        }
+    if not sched_str in sched_map.keys():
+        print(f'LR schedule type {sched_str} is unknown.')
+        return None
+    return sched_map[sched_str]    
+
+def get_lr_step(start_lr, curr_epoch, total_epochs):
+    # parameters to describe the step schedule
+    first_step = 0.6
+    second_step = 0.85
+    first_divisor = 10
+    second_divisor = 50
+
+    # determine learning rate for current epoch
+    first_cutoff = int(first_step*total_epochs)
+    second_cutoff = int(second_step*total_epochs)
+    if curr_epoch < first_cutoff:
+        return start_lr
+    elif first_cutoff <= curr_epoch < second_cutoff:
+        return start_lr / first_divisor
+    else:
+        return start_lr / second_divisor
+
+def get_lr_inverse_annealing(start_lr, curr_epoch, total_epochs):
+    return (1/(curr_epoch + 1.))*start_lr
+
+def get_lr_root_inverse_annealing(start_lr, curr_epoch, total_epochs):
+    return (1/math.sqrt(curr_epoch + 1.))*start_lr
+
+
+def update(x, y, net, opt, loss_func=nn.CrossEntropyLoss()):
     """runs a single batch and returns the loss"""
   
     x = x.to(net.device)
@@ -79,6 +118,14 @@ def main(specs):
         return None
     model = model.to(model.device)
 
+    # get the learning rate scheduling method
+    start_lr = specs['opt_specs']['lr']
+    lr_sched_func = None
+    if specs['lr_sched_type'] is not None:
+        lr_sched_func = get_lr_sched_func(specs['lr_sched_type'])
+        if lr_sched_func is None:
+            return None
+
     # get the optimizer
     opt = get_optimizer_class(specs['opt'], specs['use_pytorch_opt'])
     if opt is None:
@@ -104,18 +151,28 @@ def main(specs):
     else:
         print(f'Dataset {specs["dataset"]} is unknown.')
         return None        
-   
+
+    # main training loop 
     losses = []
     accs = []
     for e in range(specs['epochs']):
+        # determine the next learning rate -- store it in optimizer
+        if lr_sched_func is not None:
+            next_lr = lr_sched_func(start_lr, e, specs['epochs'])
+            opt.lr = next_lr
+
         # go through entire training data loader
         model.train()
         if specs['use_tqdm']:
-            loss = [update(x, y, model, opt, use_pytorch_opt=specs['use_pytorch_opt'])
-                    for x, y in tqdm(train_dl)]
+            loss = []
+            for x, y in tqdm(train_dl):
+                tmp_loss = update(x, y, model, opt, loss_func)
+                loss.append(tmp_loss)
         else:
-            loss = [update(x, y, model, opt, use_pytorch_opt=specs['use_pytorch_opt'])
-                    for x, y in train_dl]
+            loss = []
+            for x, y in train_dl:
+                tmp_loss = update(x, y, model, opt, loss_func)
+                loss.append(tmp_loss)
         mean_loss = sum(loss)/len(loss)
         print(f'Epoch {e} loss: {mean_loss:.4f}')
         losses.append(mean_loss)
@@ -261,13 +318,14 @@ if __name__=='__main__':
     # global training parameters
     training_specs = {
             'model': 'CNN',
-            'opt': 'SGD',
+            'opt': 'ADAM',
             'loss': 'CE',
             #'num_in': 784,
             'num_out': 10,
             'epochs': 40,
             'use_tqdm': True,
             'use_pytorch_opt': False,
+            'lr_sched_type': 'step',
             'opt_specs': {
                     'lr': 3e-3,
                     #'wd': 1e-4,
