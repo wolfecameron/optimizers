@@ -15,6 +15,7 @@ from optimizers import (
     SGD_momentum,
     RMS_prop,    
     Adam,
+    AdamMS,
     Adagrad,
     Adadelta,
 )
@@ -30,8 +31,10 @@ def get_optimizer_class(opt_str, use_pytorch_opt=False):
                 'ADAM': Adam,
                 'ADAG': Adagrad,
                 'ADAD': Adadelta,
+                'ADAMMS': AdamMS,
             }
     else:
+        print('Using the PyTorch optimizers!')
         opt_map = {
                 'SGD': torch.optim.SGD,
                 'SGDM': torch.optim.SGD,
@@ -81,6 +84,8 @@ def get_lr_inverse_annealing(start_lr, curr_epoch, total_epochs):
 def get_lr_root_inverse_annealing(start_lr, curr_epoch, total_epochs):
     return (1/math.sqrt(curr_epoch + 1.))*start_lr
 
+def momentum_scheduler(m, curr_epoch, total_epochs):
+    return m*((1 - ((curr_epoch + 1)/total_epochs))/((1 - m) + m*(1 - ((curr_epoch + 1)/total_epochs))))
 
 def update(x, y, net, opt, loss_func=nn.CrossEntropyLoss()):
     """runs a single batch and returns the loss"""
@@ -118,14 +123,6 @@ def main(specs):
         return None
     model = model.to(model.device)
 
-    # get the learning rate scheduling method
-    start_lr = specs['opt_specs']['lr']
-    lr_sched_func = None
-    if specs['lr_sched_type'] is not None:
-        lr_sched_func = get_lr_sched_func(specs['lr_sched_type'])
-        if lr_sched_func is None:
-            return None
-
     # get the optimizer
     opt = get_optimizer_class(specs['opt'], specs['use_pytorch_opt'])
     if opt is None:
@@ -141,6 +138,21 @@ def main(specs):
     else:
         print(f'Loss function type {specs["loss"]} is unknown.')
         return None
+    
+    # get the learning rate scheduling method
+    start_lr = specs['opt_specs']['lr']
+    lr_sched_func = None
+    if specs['lr_sched_type'] is not None:
+        lr_sched_func = get_lr_sched_func(specs['lr_sched_type'])
+        if lr_sched_func is None:
+            return None
+
+
+    # get the momentum scheduling function
+    start_m = opt.m
+    momentum_sched_func = None
+    if specs['momentum_sched']:
+        momentum_sched_func = momentum_scheduler
 
     # get the data
     if specs['dataset'] == 'MNIST':
@@ -160,6 +172,11 @@ def main(specs):
         if lr_sched_func is not None:
             next_lr = lr_sched_func(start_lr, e, specs['epochs'])
             opt.lr = next_lr
+
+        # determine the next momentum coefficient -- store in optimizer
+        if momentum_sched_func is not None:
+            next_m = momentum_sched_func(start_m, e, specs['epochs'])
+            opt.m = next_m
 
         # go through entire training data loader
         model.train()
@@ -318,7 +335,7 @@ if __name__=='__main__':
     # global training parameters
     training_specs = {
             'model': 'CNN',
-            'opt': 'ADAM',
+            'opt': 'SGDM',
             'loss': 'CE',
             #'num_in': 784,
             'num_out': 10,
@@ -326,6 +343,7 @@ if __name__=='__main__':
             'use_tqdm': True,
             'use_pytorch_opt': False,
             'lr_sched_type': 'step',
+            'momentum_sched': True,
             'opt_specs': {
                     'lr': 3e-3,
                     #'wd': 1e-4,
