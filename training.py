@@ -30,7 +30,6 @@ def get_optimizer_class(opt_str, use_pytorch_opt=False):
                 'ADAM': Adam,
                 'ADAG': Adagrad,
                 'ADAD': Adadelta,
-                'ADAMMS': AdamMS,
             }
     else:
         print('Using the PyTorch optimizers!')
@@ -117,7 +116,7 @@ def main(specs):
                     stride=(2, 2), padding=(3, 3))
         model.fc = torch.nn.Linear(in_features=512, out_features=specs['num_out'])
         model.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    elif specs['model'] == 'BIGCNN'
+    elif specs['model'] == 'BIGCNN':
         # get resnet50 and change size of input/output layer
         model = models.resnet50(pretrained=False)
         if specs['dataset'] == 'MNIST':
