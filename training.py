@@ -15,7 +15,6 @@ from optimizers import (
     SGD_momentum,
     RMS_prop,    
     Adam,
-    AdamMS,
     Adagrad,
     Adadelta,
 )
@@ -106,7 +105,7 @@ def main(specs):
     if specs['model'] == 'LR':
         model = Mnist_Logistic(specs['num_in'], specs['num_out'])
     elif specs['model'] == 'CNN':
-        # get resnet18 and change size of output layer
+        # get resnet18 and change size of input/output layer
         model = models.resnet18(pretrained=False)
         if specs['dataset'] == 'MNIST':
             model.conv1 = torch.nn.Conv2d(
@@ -118,6 +117,20 @@ def main(specs):
                     stride=(2, 2), padding=(3, 3))
         model.fc = torch.nn.Linear(in_features=512, out_features=specs['num_out'])
         model.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    elif specs['model'] == 'BIGCNN'
+        # get resnet50 and change size of input/output layer
+        model = models.resnet50(pretrained=False)
+        if specs['dataset'] == 'MNIST':
+            model.conv1 = torch.nn.Conv2d(
+                    in_channels=1, out_channels=64, kernel_size=(7, 7),
+                    stride=(2, 2), padding=(3, 3))
+        else:
+            model.conv1 = torch.nn.Conv2d(
+                    in_channels=3, out_channels=64, kernel_size=(7, 7),
+                    stride=(2, 2), padding=(3, 3))
+        model.fc = torch.nn.Linear(in_features=2048, out_features=specs['num_out'])
+        model.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
     else:
         print(f'Model type {specs["model"]} is unknown.')
         return None
@@ -146,7 +159,6 @@ def main(specs):
         lr_sched_func = get_lr_sched_func(specs['lr_sched_type'])
         if lr_sched_func is None:
             return None
-
 
     # get the momentum scheduling function
     start_m = opt.m
@@ -334,7 +346,7 @@ def convex_test(training_specs):
 if __name__=='__main__':
     # global training parameters
     training_specs = {
-            'model': 'CNN',
+            'model': 'CNN_big',
             'opt': 'SGDM',
             'loss': 'CE',
             #'num_in': 784,
