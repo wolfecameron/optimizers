@@ -118,14 +118,11 @@ def main(specs):
         model.device = 'cuda' if torch.cuda.is_available() else 'cpu'
     elif specs['model'] == 'BIGCNN':
         # get resnet50 and change size of input/output layer
-        model = models.resnet50(pretrained=False)
+        # can also initialize as pretrained for faster training/better performance
+        model = models.resnext50_32x4d(pretrained=False)
         if specs['dataset'] == 'MNIST':
             model.conv1 = torch.nn.Conv2d(
                     in_channels=1, out_channels=64, kernel_size=(7, 7),
-                    stride=(2, 2), padding=(3, 3))
-        else:
-            model.conv1 = torch.nn.Conv2d(
-                    in_channels=3, out_channels=64, kernel_size=(7, 7),
                     stride=(2, 2), padding=(3, 3))
         model.fc = torch.nn.Linear(in_features=2048, out_features=specs['num_out'])
         model.device = 'cuda' if torch.cuda.is_available() else 'cpu'
