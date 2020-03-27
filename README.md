@@ -12,9 +12,9 @@
 
 # Create Environment/Install dependencies
 - must first install anaconda for this to work!
->>> conda create -n optimization python=3.6 anaconda
->>> conda activate optimization
->>> pip install -r requirements.txt
+> conda create -n optimization python=3.6 anaconda
+> conda activate optimization
+> pip install -r requirements.txt
 
 # File Descriptions
 - get_data.py: contains helper methods for downloading/formatting data
