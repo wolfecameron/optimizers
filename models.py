@@ -44,7 +44,7 @@ class LR_finder():
         # run a little training before lr finder
         # this makes the lr graph easier to read usually
         print('Running initial training...')
-        total_batch = [x for x in range(10)]
+        total_batch = [x for x in range(5)]
         for (x, y), _ in tqdm(zip(self.train_dl, total_batch)):
             self.opt.zero_grad()
             y_hat = self.model(x)
@@ -87,7 +87,7 @@ class LR_finder():
 
     def lr_plot(self, title='Learning Rate Finder'):
         assert len(self.losses) > 0 and len(self.losses) == len(self.log_lrs)
-        plt.plot([math.pow(10, x) for x in self.log_lrs], self.losses)
+        plt.plot(self.log_lrs, self.losses)
         plt.xlabel("Learning Rate (log scale)")
         plt.ylabel(f"Loss, Beta={self.beta:.4f}")
         plt.title(title)
@@ -101,9 +101,9 @@ if __name__=='__main__':
             stride=(2, 2), padding=(3, 3))
     model.fc = torch.nn.Linear(in_features=512, out_features=10)
     model.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    opt = SGD_momentum(model, lr=3e-3)
+    opt = SGD_momentum(model, lr=3e-4)
     loss_func = torch.nn.CrossEntropyLoss()
-    train_dl, _, _ = get_cifar10_dl(**{'bs': 64})
+    train_dl, _, _ = get_cifar10_dl(**{'bs': 128})
 
     # run the lr finder
     start_lr = 1e-6
@@ -111,4 +111,4 @@ if __name__=='__main__':
     beta = 0.98
     lr_finder = LR_finder(start_lr, end_lr, model, opt, loss_func, train_dl, beta)
     lr_finder.lr_find()
-    lr_finder.lr_plot('Adam LR Finder')
+    lr_finder.lr_plot('SGD w/ Momentum LR Finder')
