@@ -1,6 +1,7 @@
 # all model definitions for optimizer tests
 
 # necessary to fix issues with matplotlib on mac
+import math
 import os
 os.environ['KMP_DUPLICATE_LIB_OK']='True'
 from tqdm import tqdm
@@ -25,21 +26,25 @@ class Mnist_Logistic(nn.Module):
 
 class LR_finder():
     def __init__(
-            self, start_lr:float, end_lr: float, num_it:int,
-            model, opt, loss_func, train_dl):
+            self, start_lr:float, end_lr: float,
+            model, opt, loss_func, train_dl, beta=0.95):
         assert start_lr < end_lr
-        self.lr_sched = np.arange(start_lr, end_lr, (end_lr - start_lr)/num_it)
+        self.lr_mult = (end_lr/start_lr)**(1/(len(train_dl) - 1))
+        self.start_lr = start_lr
+        self.end_lr = end_lr
         self.model = model
         self.opt = opt
         self.loss_func = loss_func
         self.train_dl = train_dl
+        self.beta = beta
         self.losses = []
+        self.log_lrs = []
    
     def lr_find(self):
         # run a little training before lr finder
         # this makes the lr graph easier to read usually
         print('Running initial training...')
-        total_batch = [x for x in range(50)] # only run 100 batch of training
+        total_batch = [x for x in range(10)]
         for (x, y), _ in tqdm(zip(self.train_dl, total_batch)):
             self.opt.zero_grad()
             y_hat = self.model(x)
@@ -47,23 +52,44 @@ class LR_finder():
             loss.backward()
             self.opt.step()
 
-        # run a mini batch with each learning rate, keep track of loss
-        self.losses = [] # always clear losses before next test
-        for lr_curr in tqdm(self.lr_sched):
+        # run a batch with all different learning rates over an epoch
+        print('Running lr sweep...')
+        best_loss = None
+        exp_avg_loss = 0.
+        lr_curr = self.start_lr
+        self.losses = [] # always clear losses/lrs before next test
+        self.log_lrs = []
+        i = 1
+        for x, y in tqdm(self.train_dl):
+            # set lr and calculate loss over batch
             self.opt.lr = lr_curr
             self.opt.zero_grad()
-            x, y = next(iter(self.train_dl)) # always run on same batch
             y_hat = self.model(x)
             loss = self.loss_func(y_hat, y)
             loss.backward()
-            self.losses.append(loss.item())
+            
+            # compute exponential average for the loss
+            exp_avg_loss = self.beta * exp_avg_loss + (1 - self.beta) * loss.item()
+            debias_loss = exp_avg_loss / (1 - self.beta**i)
+            if best_loss is None:
+                best_loss = debias_loss
+            elif debias_loss > 5 * best_loss:
+                break
+            elif debias_loss < best_loss:
+                best_loss = debias_loss
+            self.losses.append(debias_loss)
+            self.log_lrs.append(math.log10(lr_curr))
+
+            # update parameters and learning rate
             self.opt.step()
-  
+            lr_curr *= self.lr_mult
+            i += 1
+
     def lr_plot(self, title='Learning Rate Finder'):
-        assert len(self.losses) > 0
-        plt.plot(self.lr_sched, self.losses)
-        plt.xlabel("Learning Rate")
-        plt.ylabel("Loss")
+        assert len(self.losses) > 0 and len(self.losses) == len(self.log_lrs)
+        plt.plot([math.pow(10, x) for x in self.log_lrs], self.losses)
+        plt.xlabel("Learning Rate (log scale)")
+        plt.ylabel(f"Loss, Beta={self.beta:.4f}")
         plt.title(title)
         plt.show()
 
@@ -80,9 +106,9 @@ if __name__=='__main__':
     train_dl, _, _ = get_cifar10_dl(**{'bs': 64})
 
     # run the lr finder
-    start_lr = 1e-3
-    end_lr = .3
-    num_it = 20
-    lr_finder = LR_finder(start_lr, end_lr, num_it, model, opt, loss_func, train_dl)
+    start_lr = 1e-6
+    end_lr = 1
+    beta = 0.98
+    lr_finder = LR_finder(start_lr, end_lr, model, opt, loss_func, train_dl, beta)
     lr_finder.lr_find()
     lr_finder.lr_plot('Adam LR Finder')
