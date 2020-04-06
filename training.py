@@ -17,6 +17,7 @@ from optimizers import (
     Adam,
     Adagrad,
     Adadelta,
+    AdamW,
 )
 
 def get_optimizer_class(opt_str, use_pytorch_opt=False):
@@ -30,6 +31,7 @@ def get_optimizer_class(opt_str, use_pytorch_opt=False):
                 'ADAM': Adam,
                 'ADAG': Adagrad,
                 'ADAD': Adadelta,
+                'ADAMW': AdamW,
             }
     else:
         print('Using the PyTorch optimizers!')
@@ -338,12 +340,32 @@ def convex_test(training_specs):
         loss_results[exp_name] = losses
     plot_metrics(loss_results, title='Training Loss')
     plot_metrics(acc_results, title='Validation Accuracy', ylabel='Accuracy')
-        
+
+def AdamW_grid_search(specs):
+    lr_vals = [3e-4, 1e-3, 3e-3, 1e-2]
+    wd_vals = [0.003, 0.01, 0.03, 0.1, 0.3]
+    specs['opt'] = 'ADAMW'
+    specs['use_pytorch_opt'] = False
+    loss_results = {}
+    acc_results = {}
+    for lr in lr_vals:
+        for wd in wd_vals:
+            exp_name = f'LR: {lr}, WD: {wd}'
+            specs['opt_specs'] = {
+                        'lr': lr,
+                        'wd': wd,
+                    }   
+            losses, acc = main(specs)
+            loss_results[exp_name] = losses
+            acc_results[exp_name] = acc
+    plot_metrics(loss_results, title='Training Loss')
+    plot_metrics(acc_results, title='Validation Accuracy', ylabel='Accuracy')
+
 if __name__=='__main__':
     # global training parameters
     training_specs = {
-            'model': 'CNN_big',
-            'opt': 'SGDM',
+            'model': 'BIGCNN',
+            'opt': 'ADAMW',
             'loss': 'CE',
             #'num_in': 784,
             'num_out': 10,
@@ -366,4 +388,4 @@ if __name__=='__main__':
                     'bs': 128,
             }
         }
-    main(training_specs)
+    AdamW_grid_search(training_specs)

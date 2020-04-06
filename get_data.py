@@ -6,7 +6,12 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from torch.utils.data import TensorDataset, DataLoader
+import torchvision
+from torch.utils.data import (
+    TensorDataset,
+    DataLoader,
+    Dataset,
+)
 
 def get_mnist_data(flat:bool=True):
     path = Path('./data_files/')
@@ -43,7 +48,7 @@ def get_cifar10_dl(path='./data_files/cifar-10-batches-py/', bs=128):
     data = reshape_cifar_data(data)
     data = torch.tensor(data, dtype=torch.float)
     labels = torch.tensor(labels)
-    trn_ds = TensorDataset(data, labels)
+    trn_ds = CifarDataset(data, labels, True)
     trn_dl = DataLoader(trn_ds, batch_size=bs)
 
     # get the validation data
@@ -56,7 +61,7 @@ def get_cifar10_dl(path='./data_files/cifar-10-batches-py/', bs=128):
     valid_data = reshape_cifar_data(valid_data)
     valid_data = torch.tensor(valid_data, dtype=torch.float)
     valid_labels = torch.tensor(valid_labels, dtype=torch.float)
-    valid_ds = TensorDataset(valid_data, valid_labels)
+    valid_ds = CifarDataset(valid_data, valid_labels, False)
     valid_dl = DataLoader(valid_ds, batch_size=bs)
 
     # get the test data
@@ -69,9 +74,8 @@ def get_cifar10_dl(path='./data_files/cifar-10-batches-py/', bs=128):
     test_data = reshape_cifar_data(test_data)
     test_data = torch.tensor(test_data, dtype=torch.float)
     test_labels = torch.tensor(test_labels)
-    test_ds = TensorDataset(test_data, test_labels)
+    test_ds = CifarDataset(test_data, test_labels, False)
     test_dl = DataLoader(test_ds, batch_size=bs)
-
     return trn_dl, valid_dl, test_dl
 
 def reshape_cifar_data(img, to_view:bool=False):
@@ -87,3 +91,35 @@ def reshape_cifar_data(img, to_view:bool=False):
         if to_view:
             img = img.transpose(1, 2, 0)
     return img
+
+class CifarDataset(Dataset):
+    def __init__(self, tensor:torch.tensor, labels:torch.tensor, use_trans:bool=True):
+        super().__init__()
+        self.tensor = tensor
+        self.labels = labels
+        # mean/std stats are borrowed from the fast.ai cifar10 notebooks
+        self.stats = (
+                torch.tensor([0.4914, 0.48216, 0.44653]),
+                torch.tensor([0.24703, 0.24349, 0.26159]))
+
+        # during training, use the full data augmentation
+        if use_trans:
+            self.trans = torchvision.transforms.Compose([
+                    torchvision.transforms.ToPILImage(),
+                    torchvision.transforms.ColorJitter(0.7, 0.7, 0.7, 0.1),
+                    torchvision.transforms.RandomHorizontalFlip(),
+                    torchvision.transforms.RandomCrop(32, padding=4, padding_mode='reflect'),
+                    torchvision.transforms.ToTensor(),
+                    torchvision.transforms.Normalize(self.stats[0], self.stats[1])])
+
+        # during testing, only normalize the images
+        else:
+            self.trans = torchvision.transforms.Normalize(self.stats[0], self.stats[1])
+
+    def __len__(self):
+        return self.tensor.shape[0]
+
+    def __getitem__(self, index):
+        data = self.tensor[index, :]
+        label = self.labels[index]
+        return self.trans(data), label

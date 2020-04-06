@@ -176,3 +176,60 @@ class Adam(SGD_main):
           
             # update iteration for bias correction
             self.t += 1
+
+class AdamW(SGD_main):
+    """adam (adaptive moment estimation) optimizer"""
+  
+    def __init__(
+            self, model, lr:float=3e-3, m:float=.9, b:float=.99,
+            wd:float=.01, e:float=1e-8):
+        super().__init__(model, lr)
+        self.m = m
+        self.b = b
+        self.wd = wd
+        self.epsilon = e
+        self.prev_mom = []
+        self.prev_rms = []
+        self.t = 1.
+    
+    def step(self):
+        """performs both weight decay and optimization step"""
+
+        with torch.no_grad():
+            # weight decay
+            for i, p in enumerate(self.model.parameters()):
+                if not p.grad is None:
+                    p.sub_(self.lr*self.wd*p)
+
+            # normal gradient update
+            for i, p in enumerate(self.model.parameters()):
+                if not p.grad is None:
+                    if i >= len(self.prev_mom) or i >= len(self.prev_rms):
+                        # first moment of gradient
+                        m_t = (1-self.m) * p.grad
+                        self.prev_mom.append(m_t)
+            
+                        # second moment of gradient
+                        v_t = (1-self.b) * (p.grad**2)
+                        self.prev_rms.append(v_t)
+                    else:
+                        # first moment of gradient
+                        m_t = self.m*self.prev_mom[i] + (1-self.m) * p.grad
+                        self.prev_mom[i] = m_t
+          
+                        # second moment of gradient
+                        v_t = self.b*self.prev_rms[i] + (1-self.b) * (p.grad**2)
+                        self.prev_rms[i] = v_t
+            
+                    # perform update
+                    """NOTE: this correction must be done because m_t and v_t are initialized
+                    to zero, which causes the exp decay avg (for both moments) to be biased toward
+                    zero especially at the first few updates - this update here is used to correct
+                    this bias -- correction becomes lesser at later iterations"""
+                    m_t_hat = m_t/(1 - self.m**self.t)
+                    v_t_hat = v_t/(1 - self.b**self.t)
+                    step = (self.lr * m_t_hat)/(torch.sqrt(v_t_hat) + self.epsilon)
+                    p.sub_(step) # update the params inplace
+          
+            # update iteration for bias correction
+            self.t += 1
