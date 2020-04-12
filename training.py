@@ -18,7 +18,7 @@ from vis import plot_metrics
 from optimizers import (
     SGD_main,
     SGD_momentum,
-    RMS_prop,    
+    RMS_prop,
     Adam,
     Adagrad,
     Adadelta,
@@ -199,8 +199,7 @@ def main(specs):
     for e in range(specs['epochs']):
         # save model intermittently throughout training
         if e % 10 == 0:
-            save_model(model)
-            files.download('./model_params/cf10.th')
+            save_model(model) # saves the model into google drive
 
         # determine the next learning rate -- store it in optimizer
         if lr_sched_func is not None:
@@ -430,8 +429,8 @@ if __name__=='__main__':
             'lr_sched_type': 'step',
             'momentum_sched': False,
             'opt_specs': {
-                    'lr': 1e-3,
-                    'wd': .01,
+                    'lr': 3e-3,
+                    'wd': 0.003,
                     #'momentum': 0.,
                     #'m': .9,
                     #'b': .999,

@@ -103,7 +103,7 @@ class LR_finder():
         return self.log_lrs, self.losses
 
 def save_model(model):
-    return save(model.state_dict(), './model_params/cf10.th')
+    return save(model.state_dict(), '../drive/My Drive/optimizers/cf10.th')
 
 if __name__=='__main__':
     # get everything needed for lr finder
