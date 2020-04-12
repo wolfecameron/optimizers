@@ -4,15 +4,17 @@
 import math
 import os
 os.environ['KMP_DUPLICATE_LIB_OK']='True'
+from os import path
 from tqdm import tqdm
 
+from torch import save
 import numpy as np
 import torch
 from torch import nn
 from torchvision import models
 import matplotlib.pyplot as plt
 
-from optimizers import SGD_momentum, Adam
+from optimizers import SGD_momentum, Adam, AdamW
 from get_data import get_cifar10_dl
 
 class Mnist_Logistic(nn.Module):
@@ -93,22 +95,53 @@ class LR_finder():
         plt.title(title)
         plt.show()
 
+    def get_metrics(self):
+        """useful if you want to run multiple lr finders with different
+        settings and plot them together"""
+
+        assert len(self.losses) > 0 and len(self.losses) == len(self.log_lrs)
+        return self.log_lrs, self.losses
+
+def save_model(model):
+    return save(model.state_dict(), './model_params/cf10.th')
+
 if __name__=='__main__':
     # get everything needed for lr finder
-    model = models.resnet18(pretrained=False)
-    model.conv1 = torch.nn.Conv2d(
-            in_channels=3, out_channels=64, kernel_size=(7, 7),
-            stride=(2, 2), padding=(3, 3))
-    model.fc = torch.nn.Linear(in_features=512, out_features=10)
-    model.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    opt = SGD_momentum(model, lr=3e-4)
-    loss_func = torch.nn.CrossEntropyLoss()
-    train_dl, _, _ = get_cifar10_dl(**{'bs': 128})
-
-    # run the lr finder
-    start_lr = 1e-6
-    end_lr = 1
+    colors = ['r', 'g', 'b', 'y', 'k']
+    start_lr = 1e-4
+    end_lr = .1
     beta = 0.98
-    lr_finder = LR_finder(start_lr, end_lr, model, opt, loss_func, train_dl, beta)
-    lr_finder.lr_find()
-    lr_finder.lr_plot('SGD w/ Momentum LR Finder')
+    loss_func = torch.nn.CrossEntropyLoss()
+    #decays = [.003, .01, .03, .1]
+    losses = []
+    log_lrs = []
+    for wd in decays:
+        model = models.resnet50(pretrained=False)
+        model.conv1 = torch.nn.Conv2d(
+                in_channels=3, out_channels=64, kernel_size=(3, 3),
+                stride=(2, 2), padding=(1, 1))
+        model.fc = torch.nn.Linear(in_features=2048, out_features=10)
+        model.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        opt = AdamW(model, lr=start_lr, wd=wd)
+        train_dl, _, _ = get_cifar10_dl(**{'bs': 128})
+
+        # run the lr finder
+        lr_finder = LR_finder(start_lr, end_lr, model, opt, loss_func, train_dl, beta)
+        lr_finder.lr_find()
+        log_lr, loss = lr_finder.get_metrics()
+        losses.append(loss)
+        log_lrs.append(log_lr)
+
+
+    # plot all of the entries in the lr finder together
+    plt.xlabel('Learning Rate (log scale)')
+    plt.ylabel(f'Loss, Beta={beta:.4f}')
+    print(losses)
+    print(log_lrs)
+    print(decays)
+    print(colors)
+    for c, loss, log_lr, wd in zip(colors, losses, log_lrs, decays):
+        exp_name = f'WD={wd}'
+        plt.plot(log_lr, loss, color=c, label=exp_name)
+        plt.legend()
+    plt.show()

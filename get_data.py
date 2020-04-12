@@ -4,6 +4,8 @@ import pickle
 import gzip
 from pathlib import Path
 
+import matplotlib.pyplot as plt
+
 import numpy as np
 import torch
 import torchvision
@@ -46,7 +48,7 @@ def get_cifar10_dl(path='./data_files/cifar-10-batches-py/', bs=128):
     labels = np.concatenate(labels, axis=0)
     data = np.concatenate(data, axis=0)
     data = reshape_cifar_data(data)
-    data = torch.tensor(data, dtype=torch.float)
+    data = torch.tensor(data, dtype=torch.float)/255. # normalize px between 0 and 1
     labels = torch.tensor(labels)
     trn_ds = CifarDataset(data, labels, True)
     trn_dl = DataLoader(trn_ds, batch_size=bs)
@@ -59,7 +61,7 @@ def get_cifar10_dl(path='./data_files/cifar-10-batches-py/', bs=128):
         valid_data = data_dict[b'data']
         valid_labels = data_dict[b'labels']
     valid_data = reshape_cifar_data(valid_data)
-    valid_data = torch.tensor(valid_data, dtype=torch.float)
+    valid_data = torch.tensor(valid_data, dtype=torch.float)/255.
     valid_labels = torch.tensor(valid_labels, dtype=torch.float)
     valid_ds = CifarDataset(valid_data, valid_labels, False)
     valid_dl = DataLoader(valid_ds, batch_size=bs)
@@ -72,7 +74,7 @@ def get_cifar10_dl(path='./data_files/cifar-10-batches-py/', bs=128):
         test_data = data_dict[b'data']
         test_labels = data_dict[b'labels']
     test_data = reshape_cifar_data(test_data)
-    test_data = torch.tensor(test_data, dtype=torch.float)
+    test_data = torch.tensor(test_data, dtype=torch.float)/255.
     test_labels = torch.tensor(test_labels)
     test_ds = CifarDataset(test_data, test_labels, False)
     test_dl = DataLoader(test_ds, batch_size=bs)
@@ -97,24 +99,29 @@ class CifarDataset(Dataset):
         super().__init__()
         self.tensor = tensor
         self.labels = labels
+        
         # mean/std stats are borrowed from the fast.ai cifar10 notebooks
         self.stats = (
                 torch.tensor([0.4914, 0.48216, 0.44653]),
                 torch.tensor([0.24703, 0.24349, 0.26159]))
 
         # during training, use the full data augmentation
+        # for now, don't use color jitter because not used in papers I'm trying to match
         if use_trans:
             self.trans = torchvision.transforms.Compose([
                     torchvision.transforms.ToPILImage(),
-                    torchvision.transforms.ColorJitter(0.7, 0.7, 0.7, 0.1),
-                    torchvision.transforms.RandomHorizontalFlip(),
+                    #torchvision.transforms.ColorJitter(0.6, 0.6, 0.6, 0.1),
                     torchvision.transforms.RandomCrop(32, padding=4, padding_mode='reflect'),
+                    torchvision.transforms.RandomHorizontalFlip(),
                     torchvision.transforms.ToTensor(),
                     torchvision.transforms.Normalize(self.stats[0], self.stats[1])])
 
         # during testing, only normalize the images
         else:
-            self.trans = torchvision.transforms.Normalize(self.stats[0], self.stats[1])
+            self.trans = torchvision.transforms.Compose([
+                    torchvision.transforms.ToPILImage(),
+                    torchvision.transforms.ToTensor(),
+                    torchvision.transforms.Normalize(self.stats[0], self.stats[1])])
 
     def __len__(self):
         return self.tensor.shape[0]

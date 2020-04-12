@@ -1,14 +1,19 @@
 # contains main training loop for all optimizer tests
 
 import math
+from os import path
+from google.colab import files
+
+import matplotlib.pyplot as plt
 
 from tqdm import tqdm
 import torch
 from torch import nn
 from torchvision import models
+import torch.utils.tensorboard as tb
 
 from get_data import get_mnist_dl, get_cifar10_dl
-from models import Mnist_Logistic
+from models import Mnist_Logistic, save_model
 from vis import plot_metrics
 from optimizers import (
     SGD_main,
@@ -66,7 +71,7 @@ def get_lr_step(start_lr, curr_epoch, total_epochs):
     first_step = 0.6
     second_step = 0.85
     first_divisor = 10
-    second_divisor = 50
+    second_divisor = 5
 
     # determine learning rate for current epoch
     first_cutoff = int(first_step*total_epochs)
@@ -102,6 +107,11 @@ def update(x, y, net, opt, loss_func=nn.CrossEntropyLoss()):
 def main(specs):
     """main training loop"""
 
+    # initialize the tensorboard loggers
+    if 'log_dir' in specs.keys():
+        train_logger = tb.SummaryWriter(path.join(specs['log_dir'], 'train'))
+        valid_logger = tb.SummaryWriter(path.join(specs['log_dir'], 'valid'))
+
     # get the model
     if specs['model'] == 'LR':
         model = Mnist_Logistic(specs['num_in'], specs['num_out'])
@@ -121,11 +131,16 @@ def main(specs):
     elif specs['model'] == 'BIGCNN':
         # get resnet50 and change size of input/output layer
         # can also initialize as pretrained for faster training/better performance
-        model = models.resnext50_32x4d(pretrained=False)
+        #model = models.resnext50_32x4d(pretrained=False)
+        model = models.resnet50(pretrained=False)
         if specs['dataset'] == 'MNIST':
             model.conv1 = torch.nn.Conv2d(
                     in_channels=1, out_channels=64, kernel_size=(7, 7),
                     stride=(2, 2), padding=(3, 3))
+        else:
+            model.conv1 = torch.nn.Conv2d(
+                in_channels=3, out_channels=64, kernel_size=(3, 3),
+                stride=(2, 2), padding=(1, 1))
         model.fc = torch.nn.Linear(in_features=2048, out_features=specs['num_out'])
         model.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -159,7 +174,11 @@ def main(specs):
             return None
 
     # get the momentum scheduling function
-    start_m = opt.m
+    if specs['use_pytorch_opt']:
+        start_m = next(iter(opt.param_groups))['betas'][0]
+    else:
+        start_m = opt.m
+
     momentum_sched_func = None
     if specs['momentum_sched']:
         momentum_sched_func = momentum_scheduler
@@ -178,15 +197,28 @@ def main(specs):
     losses = []
     accs = []
     for e in range(specs['epochs']):
+        # save model intermittently throughout training
+        if e % 10 == 0:
+            save_model(model)
+            files.download('./model_params/cf10.th')
+
         # determine the next learning rate -- store it in optimizer
         if lr_sched_func is not None:
             next_lr = lr_sched_func(start_lr, e, specs['epochs'])
-            opt.lr = next_lr
+            if specs['use_pytorch_opt']:
+                for p in opt.param_groups:
+                    p['lr'] = next_lr
+            else:
+                opt.lr = next_lr
 
         # determine the next momentum coefficient -- store in optimizer
         if momentum_sched_func is not None:
             next_m = momentum_sched_func(start_m, e, specs['epochs'])
-            opt.m = next_m
+            if specs['use_pytorch_opt']:
+                for p in opt.param_groups:
+                    p['betas'] = (next_m, p['betas'][1]) # only change first moment
+            else:
+                opt.m = next_m
 
         # go through entire training data loader
         model.train()
@@ -201,7 +233,9 @@ def main(specs):
                 tmp_loss = update(x, y, model, opt, loss_func)
                 loss.append(tmp_loss)
         mean_loss = sum(loss)/len(loss)
-        print(f'Epoch {e} loss: {mean_loss:.4f}')
+        if train_logger is not None:
+            train_logger.add_scalar('train_loss', mean_loss, global_step=e)
+        print(f'\nEpoch {e} loss: {mean_loss:.4f}')
         losses.append(mean_loss)
 
         # test validation performance
@@ -218,8 +252,10 @@ def main(specs):
                 total_correct += num_correct
                 total_ex += y.shape[0]
             valid_acc = total_correct/total_ex
+            if valid_logger is not None:
+                valid_logger.add_scalar('valid_acc', valid_acc, global_step=e)
             accs.append(valid_acc)
-            print(f'Epoch {e} Valid Acc.: {valid_acc:.4f}')
+            print(f'\nEpoch {e} Valid Acc.: {valid_acc:.4f}')
 
     # optionally run evaluation test data
     if test_dl is not None:
@@ -236,7 +272,7 @@ def main(specs):
                 total_correct += num_correct
                 total_ex += y.shape[0]
             test_acc = total_correct/total_ex
-            print(f'Test Accuracy: {valid_acc:.4f}')
+            print(f'\nTest Accuracy: {valid_acc:.4f}')
     return losses, accs
 
 def sgd_diff_lr(training_specs):
@@ -361,6 +397,25 @@ def AdamW_grid_search(specs):
     plot_metrics(loss_results, title='Training Loss')
     plot_metrics(acc_results, title='Validation Accuracy', ylabel='Accuracy')
 
+def adam_vs_adamw(training_specs):
+    loss_results = {}
+    acc_results = {}
+    training_specs['epochs'] = 100
+    training_specs['opt_specs'] = {'lr': 3e-3, 'weight_decay': 1e-4}
+    training_specs['use_pytorch_opt'] = True
+    training_specs['opt'] = 'ADAM'
+    loss, acc = main(training_specs)
+    loss_results['Adam'] = loss
+    acc_results['Adam'] = acc
+    training_specs['opt_specs'] = {'lr': 3e-3, 'wd': 0.1}
+    training_specs['use_pytorch_opt'] = False
+    training_specs['opt'] = 'ADAMW'
+    loss, acc = main(training_specs)
+    loss_results['AdamW'] = loss
+    acc_results['AdamW'] = acc
+    plot_metrics(loss_results, title='Training Loss')
+    plot_metrics(acc_results, title='Validation Accuracy', ylabel='Accuracy')
+
 if __name__=='__main__':
     # global training parameters
     training_specs = {
@@ -369,14 +424,14 @@ if __name__=='__main__':
             'loss': 'CE',
             #'num_in': 784,
             'num_out': 10,
-            'epochs': 40,
+            'epochs': 200,
             'use_tqdm': True,
             'use_pytorch_opt': False,
             'lr_sched_type': 'step',
-            'momentum_sched': True,
+            'momentum_sched': False,
             'opt_specs': {
-                    'lr': 3e-3,
-                    #'wd': 1e-4,
+                    'lr': 1e-3,
+                    'wd': .01,
                     #'momentum': 0.,
                     #'m': .9,
                     #'b': .999,
@@ -388,4 +443,4 @@ if __name__=='__main__':
                     'bs': 128,
             }
         }
-    AdamW_grid_search(training_specs)
+    main(training_specs)
