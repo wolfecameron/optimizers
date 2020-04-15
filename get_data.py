@@ -110,7 +110,7 @@ class CifarDataset(Dataset):
         if use_trans:
             self.trans = torchvision.transforms.Compose([
                     torchvision.transforms.ToPILImage(),
-                    torchvision.transforms.ColorJitter(0.8, 0.8, 0.8, 0.2),
+                    #torchvision.transforms.ColorJitter(0.8, 0.8, 0.8, 0.2),
                     torchvision.transforms.RandomCrop(32, padding=4, padding_mode='reflect'),
                     torchvision.transforms.RandomHorizontalFlip(),
                     torchvision.transforms.ToTensor(),

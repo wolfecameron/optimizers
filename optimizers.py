@@ -233,3 +233,33 @@ class AdamW(SGD_main):
           
             # update iteration for bias correction
             self.t += 1
+
+
+class SGDW(SGD_main):
+    """SGD with decoupled weight decay"""
+
+    def __init__(self, model, lr:float=3e-3, m:float=.9, wd:float=0.01):
+        super().__init__(model, lr)
+        self.m = m
+        self.wd = wd
+        self.prev_steps = [] # store momentum terms
+    
+    def step(self):
+        """perform update step with momentum"""
+    
+        with torch.no_grad():
+            # decoupled weight decay term
+            for i, p in enumerate(self.model.parameters()):
+                if not p.grad is None:
+                    p.sub_(self.lr*self.wd*p)
+
+            for i, p in enumerate(self.model.parameters()):
+                if not p.grad is None:
+                    if i >= len(self.prev_steps):
+                        m_t = self.lr * p.grad # prev step is assumed 0 initially
+                        self.prev_steps.append(m_t)
+                    else:
+                        # calculate momentum term for update
+                        m_t = (self.m * self.prev_steps[i]) + (self.lr * p.grad)
+                        self.prev_steps[i] = m_t
+                    p.sub_(m_t) # update parameters inplace

@@ -1,8 +1,8 @@
 # contains main training loop for all optimizer tests
 
+import pickle
 import math
 from os import path
-from google.colab import files
 
 import matplotlib.pyplot as plt
 
@@ -23,6 +23,7 @@ from optimizers import (
     Adagrad,
     Adadelta,
     AdamW,
+    SGDW,
 )
 
 def get_optimizer_class(opt_str, use_pytorch_opt=False):
@@ -37,6 +38,7 @@ def get_optimizer_class(opt_str, use_pytorch_opt=False):
                 'ADAG': Adagrad,
                 'ADAD': Adadelta,
                 'ADAMW': AdamW,
+                'SGDW': SGDW,
             }
     else:
         print('Using the PyTorch optimizers!')
@@ -131,7 +133,6 @@ def main(specs):
     elif specs['model'] == 'BIGCNN':
         # get resnet50 and change size of input/output layer
         # can also initialize as pretrained for faster training/better performance
-        #model = models.resnext50_32x4d(pretrained=False)
         model = models.resnet50(pretrained=False)
         if specs['dataset'] == 'MNIST':
             model.conv1 = torch.nn.Conv2d(
@@ -175,7 +176,13 @@ def main(specs):
 
     # get the momentum scheduling function
     if specs['use_pytorch_opt']:
-        start_m = next(iter(opt.param_groups))['betas'][0]
+        if 'ADAM' in specs['opt']:
+            start_m = next(iter(opt.param_groups))['betas'][0]
+        elif 'SGD' in specs['opt']:
+            start_m = next(iter(opt.param_groups))['momentum']
+        else:
+            print(f'Momentum scheduling now supported for {specs["opt"]}.')
+            return None
     else:
         start_m = opt.m
 
@@ -195,10 +202,11 @@ def main(specs):
 
     # main training loop 
     losses = []
+    valid_losses = []
     accs = []
     for e in range(specs['epochs']):
         # save model intermittently throughout training
-        if e % 10 == 0:
+        if e % 10 == 0 and e > 0:
             save_model(model) # saves the model into google drive
 
         # determine the next learning rate -- store it in optimizer
@@ -215,7 +223,10 @@ def main(specs):
             next_m = momentum_sched_func(start_m, e, specs['epochs'])
             if specs['use_pytorch_opt']:
                 for p in opt.param_groups:
-                    p['betas'] = (next_m, p['betas'][1]) # only change first moment
+                    if 'ADAM' in specs['opt']:
+                        p['betas'] = (next_m, p['betas'][1]) # only change first moment term
+                    else:
+                        p['momentum'] = next_m
             else:
                 opt.m = next_m
 
@@ -240,19 +251,25 @@ def main(specs):
         # test validation performance
         with torch.no_grad():
             model.eval()
+            total_valid_loss = []
             total_correct = 0.
             total_ex = 0.
             for x, y in valid_dl:
                 x = x.to(model.device)
                 y = y.to(model.device)
                 preds = model(x)
+                loss = loss_func(preds, y)
+                total_valid_loss.append(loss.item())
                 preds = preds.argmax(dim=1)
                 num_correct = int(torch.sum((preds == y).float()))
                 total_correct += num_correct
                 total_ex += y.shape[0]
+            valid_loss = sum(total_valid_loss)/len(total_valid_loss)
             valid_acc = total_correct/total_ex
             if valid_logger is not None:
                 valid_logger.add_scalar('valid_acc', valid_acc, global_step=e)
+                valid_logger.add_scalar('valid_loss', valid_loss, global_step=e)
+            valid_losses.append(valid_loss)
             accs.append(valid_acc)
             print(f'\nEpoch {e} Valid Acc.: {valid_acc:.4f}')
 
@@ -272,165 +289,68 @@ def main(specs):
                 total_ex += y.shape[0]
             test_acc = total_correct/total_ex
             print(f'\nTest Accuracy: {valid_acc:.4f}')
-    return losses, accs
 
-def sgd_diff_lr(training_specs):
-    """experiment for SGD with weight decay with a bunch of different learning rates"""
+    # persist results into an aggregate file to keep track of them
+    if specs['persist_results']:
+        curr_results = {
+                'loss': losses,
+                'valid_loss': valid_losses,
+                'valid_acc': accs
+            }
+        persist_results(specs['exp_name'], **curr_results)
 
-    training_specs['opt'] = 'SGD'
-    loss_results = {}
-    acc_results = {}
-    lrs = [1e-4, 1e-3, 1e-2, .1, 1.0, 10.0]
-    for lr in lrs:
-        exp_name = f'SGD: LR={lr:.4f}'
-        training_specs['opt_specs']['lr'] = lr
-        losses, accs = main(training_specs)
-        loss_results[exp_name] = losses
-        acc_results[exp_name] = accs
-    plot_metrics(loss_results, title='Training Losses, SGD')
-    plot_metrics(acc_results, ylabel='Accuracy', title='Validation Accuracy, SGD')
+    # print a visualization of the results
+    if specs['display_results']:
+        print(f'Displaying Training Results for {specs["exp_name"]}')
+        all_epochs = [x for x in range(len(losses))]
+        
+        # plot the loss
+        plt.title('Training Loss')
+        plt.plot(all_epochs, losses)
 
-def sgdm_diff_lr(training_specs):
-    loss_results = {}
-    acc_results = {}
-    lrs = [1e-4, 1e-3, 1e-2, .1, 1.0, 10.0]
-    training_specs['opt'] = 'SGDM'
-    training_specs['opt_specs']['m'] = 0.9 # very typical choice
-    for lr in lrs:
-        exp_name = f'SGD w/ Momentum: LR={lr:.4f}'
-        training_specs['opt_specs']['lr'] = lr
-        losses, accs = main(training_specs)
-        loss_results[exp_name] = losses
-        acc_results[exp_name] = accs
-    plot_metrics(loss_results, title='Training Losses, SGD w/ Momentum')
-    plot_metrics(acc_results, ylabel='Accuracy', title='Validation Accuracy, SGD w/ Momentum')
+        # plot the validation accuracy
+        plt.title('Validation Accuracy')
+        plt.plot(all_epochs, accs)
 
-def rmsprop_diff_lr(training_specs):
-    loss_results = {}
-    acc_results = {}
-    lrs = [1e-4, 1e-3, 1e-2, .1, 1.0, 10.0]
-    training_specs['opt'] = 'RMS'
-    training_specs['opt_specs']['b'] = 0.9 # very typical choice
-    for lr in lrs:
-        exp_name = f'RMS PROP: LR={lr:.4f}'
-        training_specs['opt_specs']['lr'] = lr
-        losses, accs = main(training_specs)
-        loss_results[exp_name] = losses
-        acc_results[exp_name] = accs
-    plot_metrics(loss_results, title='Training Losses, RMSProp')
-    plot_metrics(acc_results, ylabel='Accuracy', title='Validation Accuracy, RMSProp')
+        # plot the validation loss
+        plt.title('Validation Loss')
+        plt.plot(all_epochs, valid_losses)
 
-def adam_diff_lr(training_specs):
-    loss_results = {}
-    acc_results = {}
-    lrs = [1e-4, 1e-3, 1e-2, .1, 1.0, 10.0]
-    training_specs['opt'] = 'ADAM'
-    training_specs['opt_specs']['m'] = 0.9
-    training_specs['opt_specs']['b'] = 0.999
-    for lr in lrs:
-        exp_name = f'ADAM: LR={lr:.4f}'
-        training_specs['opt_specs']['lr'] = lr
-        losses, accs = main(training_specs)
-        loss_results[exp_name] = losses
-        acc_results[exp_name] = accs
-    plot_metrics(loss_results, title='Training Losses, Adam')
-    plot_metrics(acc_results, ylabel='Accuracy', title='Validation Accuracy, Adam')
+    return losses, accs, valid_losses
 
-def adag_diff_lr(training_specs): 
-    loss_results = {}
-    acc_results = {}
-    lrs = [1e-4, 1e-3, 1e-2, .1, 1.0, 10.0]
-    training_specs['opt'] = 'ADAG'
-    for lr in lrs:
-        exp_name = f'ADAGRAD: LR={lr:.4f}'
-        training_specs['opt_specs']['lr'] = lr
-        losses, accs = main(training_specs)
-        loss_results[exp_name] = losses
-        acc_results[exp_name] = accs
-    plot_metrics(loss_results, title='Training Losses, Adagrad')
-    plot_metrics(acc_results, ylabel='Accuracy', title='Validation Accuracy, Adagrad')
+def persist_results(exp_name, **kwargs):
+    path = '../drive/My Drive/optimizers/exp_results.pckl'
+    if os.path.exists(path):
+        with open(path, 'rb') as f:
+            results_dict = pickle.load(f)
+    else:
+        results_dict = {}
+    results_dict[exp_name] = kwargs
+    all_exp_names = results_dict.keys()
+    with open(path, 'wb') as f:
+        pickle.dump(results_dict, f)
+    print(f'Experiment successfully saved.')
+    print(f'Currently saved experiments: {all_exp_names}')
 
-def convex_test(training_specs):
-    lr_specs = {
-            'SGD': 0.03,
-            'SGDM': 0.01,
-            'RMS': 0.001,
-            'ADAM': 0.001,
-            'ADAG': 0.1,
-        }
-    all_methods = ['SGD', 'SGDM', 'RMS', 'ADAM', 'ADAG', 'ADAD']
-    acc_results = {}
-    loss_results = {}
-    for method in all_methods:
-        exp_specs = {**training_specs}
-        exp_specs['opt'] = method
-        if method in lr_specs.keys():
-            exp_name = f'{method}, LR={lr_specs[method]}'
-            exp_specs['opt_specs'] = {'lr': lr_specs[method]}
-        else:
-            exp_name = f'{method}'
-            exp_specs['opt_specs'] = {}
-        losses, acc = main(exp_specs)
-        acc_results[exp_name] = acc
-        loss_results[exp_name] = losses
-    plot_metrics(loss_results, title='Training Loss')
-    plot_metrics(acc_results, title='Validation Accuracy', ylabel='Accuracy')
-
-def AdamW_grid_search(specs):
-    lr_vals = [3e-4, 1e-3, 3e-3, 1e-2]
-    wd_vals = [0.003, 0.01, 0.03, 0.1, 0.3]
-    specs['opt'] = 'ADAMW'
-    specs['use_pytorch_opt'] = False
-    loss_results = {}
-    acc_results = {}
-    for lr in lr_vals:
-        for wd in wd_vals:
-            exp_name = f'LR: {lr}, WD: {wd}'
-            specs['opt_specs'] = {
-                        'lr': lr,
-                        'wd': wd,
-                    }   
-            losses, acc = main(specs)
-            loss_results[exp_name] = losses
-            acc_results[exp_name] = acc
-    plot_metrics(loss_results, title='Training Loss')
-    plot_metrics(acc_results, title='Validation Accuracy', ylabel='Accuracy')
-
-def adam_vs_adamw(training_specs):
-    loss_results = {}
-    acc_results = {}
-    training_specs['epochs'] = 100
-    training_specs['opt_specs'] = {'lr': 3e-3, 'weight_decay': 1e-4}
-    training_specs['use_pytorch_opt'] = True
-    training_specs['opt'] = 'ADAM'
-    loss, acc = main(training_specs)
-    loss_results['Adam'] = loss
-    acc_results['Adam'] = acc
-    training_specs['opt_specs'] = {'lr': 3e-3, 'wd': 0.1}
-    training_specs['use_pytorch_opt'] = False
-    training_specs['opt'] = 'ADAMW'
-    loss, acc = main(training_specs)
-    loss_results['AdamW'] = loss
-    acc_results['AdamW'] = acc
-    plot_metrics(loss_results, title='Training Loss')
-    plot_metrics(acc_results, title='Validation Accuracy', ylabel='Accuracy')
 
 if __name__=='__main__':
     # global training parameters
     training_specs = {
+            'exp_name': 'test',
             'model': 'BIGCNN',
-            'opt': 'ADAMW',
+            'opt': 'SGDM',
             'loss': 'CE',
             #'num_in': 784,
             'num_out': 10,
             'epochs': 200,
             'use_tqdm': True,
-            'use_pytorch_opt': False,
+            'use_pytorch_opt': True,
             'lr_sched_type': 'step',
-            'momentum_sched': False,
+            'momentum_sched': True,
             'opt_specs': {
-                    'lr': 3e-3,
-                    'wd': 0.003,
+                    'lr': .1,
+                    'weight_decay': 1e-4,
+                    'momentum': 0.9,
                     #'momentum': 0.,
                     #'m': .9,
                     #'b': .999,
@@ -441,5 +361,7 @@ if __name__=='__main__':
                     #'flat': False,
                     'bs': 128,
             }
+            'display_results': True,
+            'persist_results': True,
         }
     main(training_specs)
