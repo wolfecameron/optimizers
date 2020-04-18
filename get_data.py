@@ -33,11 +33,14 @@ def get_mnist_dl(flat=True, bs=128):
     valid_dl = DataLoader(valid_ds, batch_size=bs)
     return trn_dl, valid_dl
 
-def get_cifar10_dl(path='./data_files/cifar-10-batches-py/', bs=128):
+def get_cifar10_dl(path='./data_files/cifar-10-batches-py/', bs=128, use_valid=True):
     """method found at https://www.cs.toronto.edu/~kriz/cifar.html"""
 
     # get the training data
     file_names = ['data_batch_1', 'data_batch_2', 'data_batch_3', 'data_batch_4']
+    # optionally include the validation set within training data
+    if not use_valid:
+        file_names.append('data_batch_5')
     labels = []
     data = []
     for fn in file_names:
@@ -54,17 +57,20 @@ def get_cifar10_dl(path='./data_files/cifar-10-batches-py/', bs=128):
     trn_dl = DataLoader(trn_ds, batch_size=bs)
 
     # get the validation data
-    valid_data = None
-    valid_labels = None
-    with open(path + 'data_batch_5', 'rb') as fo:
-        data_dict = pickle.load(fo, encoding='bytes')
-        valid_data = data_dict[b'data']
-        valid_labels = data_dict[b'labels']
-    valid_data = reshape_cifar_data(valid_data)
-    valid_data = torch.tensor(valid_data, dtype=torch.float)/255.
-    valid_labels = torch.tensor(valid_labels, dtype=torch.float)
-    valid_ds = CifarDataset(valid_data, valid_labels, False)
-    valid_dl = DataLoader(valid_ds, batch_size=bs)
+    if use_valid:
+        valid_data = None
+        valid_labels = None
+        with open(path + 'data_batch_5', 'rb') as fo:
+            data_dict = pickle.load(fo, encoding='bytes')
+            valid_data = data_dict[b'data']
+            valid_labels = data_dict[b'labels']
+        valid_data = reshape_cifar_data(valid_data)
+        valid_data = torch.tensor(valid_data, dtype=torch.float)/255.
+        valid_labels = torch.tensor(valid_labels, dtype=torch.float)
+        valid_ds = CifarDataset(valid_data, valid_labels, False)
+        valid_dl = DataLoader(valid_ds, batch_size=bs)
+    else:
+        valid_dl = None
 
     # get the test data
     test_data = None

@@ -24,6 +24,8 @@ from optimizers import (
     Adadelta,
     AdamW,
     SGDW,
+    Adam_demon,
+    SGD_demon,
 )
 
 def get_optimizer_class(opt_str, use_pytorch_opt=False):
@@ -39,6 +41,8 @@ def get_optimizer_class(opt_str, use_pytorch_opt=False):
                 'ADAD': Adadelta,
                 'ADAMW': AdamW,
                 'SGDW': SGDW,
+                'ADAMD': Adam_demon,
+                'SGDD': SGD_demon,
             }
     else:
         print('Using the PyTorch optimizers!')
@@ -83,7 +87,7 @@ def get_lr_step(start_lr, curr_epoch, total_epochs):
     elif first_cutoff <= curr_epoch < second_cutoff:
         return start_lr / first_divisor
     else:
-        return start_lr / second_divisor
+        return start_lr / (second_divisor*first_divisor)
 
 def get_lr_inverse_annealing(start_lr, curr_epoch, total_epochs):
     return (1/(curr_epoch + 1.))*start_lr
@@ -91,8 +95,11 @@ def get_lr_inverse_annealing(start_lr, curr_epoch, total_epochs):
 def get_lr_root_inverse_annealing(start_lr, curr_epoch, total_epochs):
     return (1/math.sqrt(curr_epoch + 1.))*start_lr
 
-def momentum_scheduler(m, curr_epoch, total_epochs):
-    return m*((1 - ((curr_epoch + 1)/total_epochs))/((1 - m) + m*(1 - ((curr_epoch + 1)/total_epochs))))
+def momentum_scheduler(b_init, curr_epoch, total_epochs):
+    numerator = b_init*(1 - (curr_epoch/total_epochs))
+    denominator = (1 - b_init)
+    denominator += b_init*(1 - (curr_epoch/total_epochs))
+    return numerator/denominator
 
 def update(x, y, net, opt, loss_func=nn.CrossEntropyLoss()):
     """runs a single batch and returns the loss"""
@@ -108,6 +115,11 @@ def update(x, y, net, opt, loss_func=nn.CrossEntropyLoss()):
 
 def main(specs):
     """main training loop"""
+
+    # check if this experiment has already been run yet
+    if specs['persist_results'] and check_results_exist(specs['exp_name']):
+        print(f'{specs["exp_name"]} was not run. Results already exist')
+        return None
 
     # initialize the tensorboard loggers
     if 'log_dir' in specs.keys():
@@ -129,7 +141,7 @@ def main(specs):
                     in_channels=3, out_channels=64, kernel_size=(7, 7),
                     stride=(2, 2), padding=(3, 3))
         model.fc = torch.nn.Linear(in_features=512, out_features=specs['num_out'])
-        model.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        model.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     elif specs['model'] == 'BIGCNN':
         # get resnet50 and change size of input/output layer
         # can also initialize as pretrained for faster training/better performance
@@ -143,8 +155,7 @@ def main(specs):
                 in_channels=3, out_channels=64, kernel_size=(3, 3),
                 stride=(2, 2), padding=(1, 1))
         model.fc = torch.nn.Linear(in_features=2048, out_features=specs['num_out'])
-        model.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
+        model.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     else:
         print(f'Model type {specs["model"]} is unknown.')
         return None
@@ -181,7 +192,7 @@ def main(specs):
         elif 'SGD' in specs['opt']:
             start_m = next(iter(opt.param_groups))['momentum']
         else:
-            print(f'Momentum scheduling now supported for {specs["opt"]}.')
+            print(f'Momentum scheduling not supported for {specs["opt"]}.')
             return None
     else:
         start_m = opt.m
@@ -206,7 +217,7 @@ def main(specs):
     accs = []
     for e in range(specs['epochs']):
         # save model intermittently throughout training
-        if e % 10 == 0 and e > 0:
+        if e % 20 == 0 and e > 0:
             save_model(model) # saves the model into google drive
 
         # determine the next learning rate -- store it in optimizer
@@ -244,51 +255,55 @@ def main(specs):
                 loss.append(tmp_loss)
         mean_loss = sum(loss)/len(loss)
         if train_logger is not None:
-            train_logger.add_scalar('train_loss', mean_loss, global_step=e)
+            train_logger.add_scalar(f'{specs["exp_name"]}/train_loss', mean_loss, global_step=e)
         print(f'\nEpoch {e} loss: {mean_loss:.4f}')
         losses.append(mean_loss)
 
         # test validation performance
-        with torch.no_grad():
-            model.eval()
-            total_valid_loss = []
-            total_correct = 0.
-            total_ex = 0.
-            for x, y in valid_dl:
-                x = x.to(model.device)
-                y = y.to(model.device)
-                preds = model(x)
-                loss = loss_func(preds, y)
-                total_valid_loss.append(loss.item())
-                preds = preds.argmax(dim=1)
-                num_correct = int(torch.sum((preds == y).float()))
-                total_correct += num_correct
-                total_ex += y.shape[0]
-            valid_loss = sum(total_valid_loss)/len(total_valid_loss)
-            valid_acc = total_correct/total_ex
-            if valid_logger is not None:
-                valid_logger.add_scalar('valid_acc', valid_acc, global_step=e)
-                valid_logger.add_scalar('valid_loss', valid_loss, global_step=e)
-            valid_losses.append(valid_loss)
-            accs.append(valid_acc)
-            print(f'\nEpoch {e} Valid Acc.: {valid_acc:.4f}')
+        if valid_dl is not None:
+            with torch.no_grad():
+                model.eval()
+                total_valid_loss = []
+                total_correct = 0.
+                total_ex = 0.
+                for x, y in valid_dl:
+                    x = x.to(model.device)
+                    y = y.to(model.device)
+                    preds = model(x)
+                    loss = loss_func(preds, y.long())
+                    total_valid_loss.append(loss.item())
+                    preds = preds.argmax(dim=1)
+                    num_correct = int(torch.sum((preds == y).float()))
+                    total_correct += num_correct
+                    total_ex += y.shape[0]
+                valid_loss = sum(total_valid_loss)/len(total_valid_loss)
+                valid_acc = total_correct/total_ex
+                if valid_logger is not None:
+                    valid_logger.add_scalar(f'{specs["exp_name"]}/valid_acc', valid_acc, global_step=e)
+                    valid_logger.add_scalar(f'{specs["exp_name"]}/valid_loss', valid_loss, global_step=e)
+                valid_losses.append(valid_loss)
+                accs.append(valid_acc)
+                print(f'\nEpoch {e} Valid Acc.: {valid_acc:.4f}')
 
-    # optionally run evaluation test data
-    if test_dl is not None:
-        model.eval()
-        with torch.no_grad():
-            total_correct = 0.
-            total_ex = 0.
-            for x, y in test_dl:
-                x = x.to(model.device)
-                y = y.to(model.device)
-                preds = model(x)
-                preds = preds.argmax(dim=1)
-                num_correct = int(torch.sum((preds == y).float()))
-                total_correct += num_correct
-                total_ex += y.shape[0]
-            test_acc = total_correct/total_ex
-            print(f'\nTest Accuracy: {valid_acc:.4f}')
+        if test_dl is not None and (e % specs['test_interval'] == 0 or e >= specs['epochs'] - 1):
+            # optionally run evaluation test data
+            if test_dl is not None:
+                model.eval()
+                with torch.no_grad():
+                    total_correct = 0.
+                    total_ex = 0.
+                    for x, y in test_dl:
+                        x = x.to(model.device)
+                        y = y.to(model.device)
+                        preds = model(x)
+                        preds = preds.argmax(dim=1)
+                        num_correct = int(torch.sum((preds == y).float()))
+                        total_correct += num_correct
+                        total_ex += y.shape[0]
+                    test_acc = total_correct/total_ex
+                    if valid_logger is not None:
+                        valid_logger.add_scalar(f'{specs["exp_name"]}/test_acc', test_acc, global_step=e)
+                    print(f'\nEpoch {e} Test Accuracy: {valid_acc:.4f}')
 
     # persist results into an aggregate file to keep track of them
     if specs['persist_results']:
@@ -307,50 +322,61 @@ def main(specs):
         # plot the loss
         plt.title('Training Loss')
         plt.plot(all_epochs, losses)
+        plt.show()
 
         # plot the validation accuracy
         plt.title('Validation Accuracy')
         plt.plot(all_epochs, accs)
+        plt.show()
 
         # plot the validation loss
         plt.title('Validation Loss')
         plt.plot(all_epochs, valid_losses)
-
+        plt.show()
     return losses, accs, valid_losses
 
 def persist_results(exp_name, **kwargs):
-    path = '../drive/My Drive/optimizers/exp_results.pckl'
-    if os.path.exists(path):
-        with open(path, 'rb') as f:
+    result_path = '../drive/My Drive/optimizers/exp_results.pckl'
+    if path.exists(result_path):
+        with open(result_path, 'rb') as f:
             results_dict = pickle.load(f)
     else:
         results_dict = {}
     results_dict[exp_name] = kwargs
     all_exp_names = results_dict.keys()
-    with open(path, 'wb') as f:
+    with open(result_path, 'wb') as f:
         pickle.dump(results_dict, f)
     print(f'Experiment successfully saved.')
     print(f'Currently saved experiments: {all_exp_names}')
 
+def check_results_exist(exp_name):
+    result_path = '../drive/My Drive/optimizers/exp_results.pckl'
+    if path.exists(result_path):
+        with open(result_path, 'rb') as f:
+            results_dict = pickle.load(f)
+        if exp_name in results_dict.keys():
+            return True
+    return False
 
 if __name__=='__main__':
     # global training parameters
     training_specs = {
             'exp_name': 'test',
-            'model': 'BIGCNN',
-            'opt': 'SGDM',
+            'model': 'CNN',
+            'opt': 'ADAMD',
             'loss': 'CE',
             #'num_in': 784,
             'num_out': 10,
             'epochs': 200,
             'use_tqdm': True,
-            'use_pytorch_opt': True,
-            'lr_sched_type': 'step',
+            'use_pytorch_opt': False,
+            'lr_sched_type': None,
             'momentum_sched': True,
             'opt_specs': {
-                    'lr': .1,
-                    'weight_decay': 1e-4,
-                    'momentum': 0.9,
+                    'lr': 1e-4,
+                    #'weight_decay': 1e-4,
+                    'm': 0.9,
+                    'b2': 0.999,
                     #'momentum': 0.,
                     #'m': .9,
                     #'b': .999,
@@ -360,8 +386,10 @@ if __name__=='__main__':
             'dataset_specs': {
                     #'flat': False,
                     'bs': 128,
-            }
+                    'use_valid': False,
+            },
             'display_results': True,
             'persist_results': True,
+            'test_interval': 5,
         }
     main(training_specs)

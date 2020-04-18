@@ -51,7 +51,7 @@ class SGD_momentum(SGD_main):
 class SGD_demon(SGD_main):
     """SGD momentum implemented to match https://arxiv.org/pdf/1910.04952.pdf"""
 
-    def __init__(self, model, lr:float:3e-3, m:float=0.9):
+    def __init__(self, model, lr:float=3e-3, m:float=0.9):
         super().__init__(model, lr)
         self.m = m
         self.prev_steps = []
@@ -205,7 +205,7 @@ class Adam(SGD_main):
 class Adam_demon(SGD_main):
     """implements adam to be used with demon https://arxiv.org/pdf/1910.04952.pdf"""
   
-    def __init__(self, model, lr:float=3e-3, m:float=.9, b:float=.99, e:float=1e-8):
+    def __init__(self, model, lr:float=3e-3, m:float=.9, b2:float=.99, e:float=1e-8):
         super().__init__(model, lr)
         self.m = m
         self.b2 = b2
