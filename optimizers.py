@@ -48,6 +48,31 @@ class SGD_momentum(SGD_main):
                         self.prev_steps[i] = m_t
                     p.sub_(m_t) # update parameters inplace
 
+class SGD_demon(SGD_main):
+    """SGD momentum implemented to match https://arxiv.org/pdf/1910.04952.pdf"""
+
+    def __init__(self, model, lr:float:3e-3, m:float=0.9):
+        super().__init__(model, lr)
+        self.m = m
+        self.prev_steps = []
+
+    def step(self):
+        """implements a different recursion for momentum than the one
+        given above"""
+
+        with torch.no_grad():
+            for i, p in enumerate(self.model.parameters()):
+                if not p.grad is None:
+                    if i >= len(self.prev_steps):
+                        p.sub_(self.lr*p.grad)
+                        v_t = -self.lr*p.grad
+                        self.prev_steps.append(v_t)
+                    else:
+                        update = self.lr*p.grad - self.m*self.prev_steps[i]
+                        p.sub_(update)
+                        v_t = self.m*self.prev_steps[i] - self.lr*p.grad
+                        self.prev_steps[i] = v_t
+
 class RMS_prop(SGD_main):
     """RMSProp optimizer"""
  
@@ -176,6 +201,51 @@ class Adam(SGD_main):
           
             # update iteration for bias correction
             self.t += 1
+
+class Adam_demon(SGD_main):
+    """implements adam to be used with demon https://arxiv.org/pdf/1910.04952.pdf"""
+  
+    def __init__(self, model, lr:float=3e-3, m:float=.9, b:float=.99, e:float=1e-8):
+        super().__init__(model, lr)
+        self.m = m
+        self.b2 = b2
+        self.epsilon = e
+        self.prev_m = []
+        self.prev_sm = []
+        self.t = 1.
+    
+    def step(self):
+        """perform optimization step with adam algorithm"""
+
+        with torch.no_grad():
+            for i, p in enumerate(self.model.parameters()):
+                if not p.grad is None:
+                    if i >= len(self.prev_m) or i >= len(self.prev_sm):
+                        # first moment
+                        m_t = p.grad
+                        self.prev_m.append(m_t)
+
+                        # second moment
+                        sm_t = (1. - self.b2)*(p.grad**2)
+                        self.prev_sm.append(sm_t)
+                    else:
+                        # first moment
+                        m_t = p.grad + self.m*self.prev_m[i]
+                        self.prev_m[i] = m_t
+
+                        # second moment
+                        sm_t = self.b2*self.prev_sm[i] + (1. - self.b2)*(p.grad**2)
+                        self.prev_sm[i] = sm_t
+
+                    # perform the update using first and second moment
+                    m_t_hat = m_t/(1 - self.m**self.t)
+                    sm_t_hat = sm_t/(1 - self.b2**self.t)
+                    step = (self.lr * m_t_hat)/(torch.sqrt(sm_t_hat + self.epsilon))
+                    p.sub_(step) # update the params inplace
+
+        # update iteration for bias correction 
+        self.t += 1
+
 
 class AdamW(SGD_main):
     """adam (adaptive moment estimation) optimizer"""
