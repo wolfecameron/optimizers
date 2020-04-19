@@ -54,7 +54,7 @@ def get_cifar10_dl(path='./data_files/cifar-10-batches-py/', bs=128, use_valid=T
     data = torch.tensor(data, dtype=torch.float)/255. # normalize px between 0 and 1
     labels = torch.tensor(labels)
     trn_ds = CifarDataset(data, labels, True)
-    trn_dl = DataLoader(trn_ds, batch_size=bs)
+    trn_dl = DataLoader(trn_ds, batch_size=bs, shuffle=True)
 
     # get the validation data
     if use_valid:
@@ -67,8 +67,8 @@ def get_cifar10_dl(path='./data_files/cifar-10-batches-py/', bs=128, use_valid=T
         valid_data = reshape_cifar_data(valid_data)
         valid_data = torch.tensor(valid_data, dtype=torch.float)/255.
         valid_labels = torch.tensor(valid_labels, dtype=torch.float)
-        valid_ds = CifarDataset(valid_data, valid_labels, False)
-        valid_dl = DataLoader(valid_ds, batch_size=bs)
+        valid_ds = CifarDataset(valid_data, valid_labels, use_trans=False)
+        valid_dl = DataLoader(valid_ds, batch_size=bs, shuffle=False)
     else:
         valid_dl = None
 
@@ -82,8 +82,8 @@ def get_cifar10_dl(path='./data_files/cifar-10-batches-py/', bs=128, use_valid=T
     test_data = reshape_cifar_data(test_data)
     test_data = torch.tensor(test_data, dtype=torch.float)/255.
     test_labels = torch.tensor(test_labels)
-    test_ds = CifarDataset(test_data, test_labels, False)
-    test_dl = DataLoader(test_ds, batch_size=bs)
+    test_ds = CifarDataset(test_data, test_labels, use_trans=False)
+    test_dl = DataLoader(test_ds, batch_size=bs, shuffle=False)
     return trn_dl, valid_dl, test_dl
 
 def reshape_cifar_data(img, to_view:bool=False):

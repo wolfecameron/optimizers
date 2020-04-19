@@ -122,6 +122,8 @@ def main(specs):
         return None
 
     # initialize the tensorboard loggers
+    train_logger = None
+    valid_logger = None
     if 'log_dir' in specs.keys():
         train_logger = tb.SummaryWriter(path.join(specs['log_dir'], 'train'))
         valid_logger = tb.SummaryWriter(path.join(specs['log_dir'], 'valid'))
@@ -215,6 +217,7 @@ def main(specs):
     losses = []
     valid_losses = []
     accs = []
+    test_accs = []
     for e in range(specs['epochs']):
         # save model intermittently throughout training
         if e % 20 == 0 and e > 0:
@@ -303,7 +306,8 @@ def main(specs):
                     test_acc = total_correct/total_ex
                     if valid_logger is not None:
                         valid_logger.add_scalar(f'{specs["exp_name"]}/test_acc', test_acc, global_step=e)
-                    print(f'\nEpoch {e} Test Accuracy: {valid_acc:.4f}')
+                    print(f'\nEpoch {e} Test Accuracy: {test_acc:.4f}')
+                    test_accs.append(test_acc)
 
     # persist results into an aggregate file to keep track of them
     if specs['persist_results']:
@@ -325,14 +329,24 @@ def main(specs):
         plt.show()
 
         # plot the validation accuracy
-        plt.title('Validation Accuracy')
-        plt.plot(all_epochs, accs)
-        plt.show()
+        if len(accs) > 0:
+            plt.title('Validation Accuracy')
+            plt.plot(all_epochs, accs)
+            plt.show()
 
         # plot the validation loss
-        plt.title('Validation Loss')
-        plt.plot(all_epochs, valid_losses)
-        plt.show()
+        if len(valid_losses) > 0:
+            plt.title('Validation Loss')
+            plt.plot(all_epochs, valid_losses)
+            plt.show()
+
+        if len(test_accs) > 0:
+            plt.title('Test Accuracy')
+            if specs['test_interval'] > 1:
+                plt.plot(all_epochs[::specs['test_interval']] + all_epochs[-1:], test_accs)
+            else:
+                plt.plot(all_epochs, test_accs)
+            plt.show()
     return losses, accs, valid_losses
 
 def persist_results(exp_name, **kwargs):
